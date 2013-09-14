@@ -13,13 +13,12 @@ from sqlalchemy.orm import sessionmaker
 import urllib
 
 # Django imports.
-from django.core.management.base import LabelCommand, CommandError
+from django.core.management.base import LabelCommand
 from django.template.defaultfilters import slugify
 from django.db import IntegrityError
 
 # Import Django models.
 from django.contrib.sites.models import Site
-from django.contrib.auth.models import User
 from django.contrib.comments import get_model as get_comment_model
 Comment = get_comment_model()
 
@@ -76,68 +75,30 @@ def create_mappingaction(argument_name):
     return mappingaction
 
 
-###############
-# Import code #
-###############
-class DrupalToZinnia(object):
+class DrupalDatabase(object):
     """
-    This class implements support for importing Drupal blog content into Zinnia.
+    Helper class for accessing the Drupal database. This class is a small
+    wrapper around the functionality provided by SQLAlchemy.
     """
 
-    def __init__(self, engine, node_type = "blog", users = dict(), threaded_comments = False):
+    def __init__(self, engine):
         """
-        Initialises the importer class.
-
-        Arguments:
-            engine - SQL Alchemy engine that can be used for making the sessions
-            and obtaining declarative bases.
-
-            node_type - String specifying the node type that is assigned to blog
-            entries. Defaults to "blog".
-
-            users - Dictionary specifying which users should be imported from
-            Drupal, and how to map them to Zinnia authorts. Keys are Drupal
-            usernames, and associated values are Zinnia usernames. Default
-            (empty dictionary) means all users will be processed.
-
-            threaded_comments - Specifies whether the comments should be
-            imported as threaded or not. Default is False.
-        """
-
-        # Disconnect the signals so pingbacks etc won't get called.
-        disconnect_entry_signals()
-        disconnect_discussion_signals()
-
-        self.initialise_alchemy(engine)
-        self.node_type = node_type
-        self.threaded_comments = threaded_comments
-        self.users = users
-        self.author_mapping = {}
-
-        # Extract general information from Zinnia.
-        self.site = Site.objects.get_current()
-
-        # Create a dictionary of all tag terms.
-        self.tag_mapping = {}
-        for vocabulary in self.session.query(self.Vocabulary).filter(self.Vocabulary.tags==1).all():
-            terms = self.session.query(self.TermData).filter(self.TermData.vid==vocabulary.vid).all()
-            for term in terms:
-                # The term name is not allowed to contain slashes.
-                self.tag_mapping[term.tid] = term.name.replace("/", "-")
-
-
-    def initialise_alchemy(self, engine):
-        """
-        Initialises SQLAlchemy handlers and table mappings using the provided
+        Initialises the SQLAlchemy ORM for Drupal tables using the provided
         engine.
 
         Arguments:
-            engine - SQLAlchemy engine.
+
+          engine
+            Initialised SQLAlchemy engine to use when setting-up ORM.
         """
 
+        # Store the engine and set-up a session that will be used for queries.
         self.engine = engine
         self.session = sessionmaker(bind=self.engine)()
+
         Base = declarative_base(self.engine)
+
+        # Declare Drupal ORM classes.
 
         class Node(Base):
             """
@@ -217,7 +178,8 @@ class DrupalToZinnia(object):
             __tablename__ = 'comments'
             __table_args__ = {'autoload': True}
 
-        
+
+        # Easier access to SQLAlchemy ORM.
         self.Node = Node
         self.NodeRevisions = NodeRevisions
         self.Users = Users
@@ -228,291 +190,380 @@ class DrupalToZinnia(object):
         self.Comments = Comments
 
 
-    def import_users(self):
-        """
-        Run the import of users.
-        """
+def import_users(drupal, users = None, custom_mapping = None):
+    """
+    Imports users from the provided Drupal database, taking into account any
+    desired custom mappings between usernames, and generates a mapping
+    dictionary between Drupal and Zinnia users.
 
-        # Fetch the users that should be imported.
-        drupal_users = self.session.query(self.Users).filter(self.Users.name!="")
+    Arguments:
 
-        # Determine if only a subset of users should be imported or not.
-        if self.users:
-            drupal_users = drupal_users.filter(self.Users.name.in_(self.users.keys()))
+      drupal
+        Drupal database from which the users should be imported. Should be an
+        instance of DrupalDatabase.
 
-        print "Starting import of users."
+      users
+        List of users that should be imported. If provided, only the specified
+        users will be imported from Drupal. Default (None) is to import all
+        users.
 
-        # Set-up some counters.
-        import_count = {}
-        import_count["drupal_total"] = drupal_users.count()
-        import_count["new"] = 0
-        import_count["existing"] = 0
+      custom_mapping
+        Dictionary defining desired custom mapping between Drupal users and
+        Zinnia users. Keys should be usernames in Drupal, and values should be
+        desired usernames in Zinnia.
 
-        # Process each Drupal user.
-        for drupal_user in drupal_users:
-            # Apply mapping if it was provided.
-            if self.users:
-                username = self.users[drupal_user.name]
-            else:
-                username = drupal_user.name
+    Returns:
 
-            # Create the user if it exists, or fetch the existing entry.
-            try:
-                User.objects.filter(username=username).exists()
-                user = User.objects.create_user(username, drupal_user.mail,
-                                                getattr(drupal_user, "pass"))
-                user.save()
-                print "Added user: %s" % username
-                import_count["new"] += 1
-            except IntegrityError:
-                user = User.objects.get(username=username)
-                print "User already exists: %s" % username
-                import_count["existing"] += 1
+      Tuple consisting out of two elements. The first element is dictionary with
+      import statistics. The second is a dictionary describing (actual) mapping
+      between the Drupal and Zinnia users, where keys are Drupal user IDs, and
+      values are Zinnia user IDs.
+    """
 
+    mapping = {}
+
+    # Fetch the users from Drupal.
+    if users:
+        drupal_users = drupal.session.query(drupal.Users).filter(drupal.Users.name.in_(users))
+    else:
+        drupal_users = drupal.session.query(drupal.Users).filter(drupal.Users.name!="")
+
+    # Set-up the statistics.
+    statistics = {
+        'drupal_total': drupal_users.count(),
+        'zinnia_new': 0,
+        'zinnia_existing': 0,
+        }
+
+    # Process each Drupal user.
+    for drupal_user in drupal_users:
+        # Apply mapping if it was provided.
+        username = custom_mapping.get(drupal_user.name, drupal_user.name)
+
+        # Fetch the user if it already exists, or create a new one if it
+        # doesn't.
+        try:
             author = Author.objects.get(username=username)
+            print "User already exists: %s" % username
+            statistics["zinnia_existing"] += 1
+        except Author.DoesNotExist:
+            author = Author.objects.create_user(username, drupal_user.mail,
+                                                getattr(drupal_user, "pass"))
+            author.save()
+            print "Added user: %s" % username
+            statistics["zinnia_new"] += 1
 
-            self.author_mapping[drupal_user.uid] = user
-            print "Drupal user '%s' mapped to Zinnia author '%s'" % (drupal_user.name, username)
+        mapping[drupal_user.uid] = author.id
 
-        print "Total number of users in Drupal: %d" % import_count["drupal_total"]
-        print "Imported users: %d" % import_count["new"]
-        print "Skipped existing users: %d" % import_count["existing"]
+    return statistics, mapping
 
-    def import_content(self):
-        """
-        Imports the blog entry content from Drupal into Zinnia.
-        """
 
-        # Get a list of all blogs, sorted by creation date.
-        nodes = self.session.query(self.Node).filter(self.Node.type == self.node_type,
-                                                     self.Node.uid.in_(self.author_mapping.keys())).order_by(self.Node.created)
+def import_categories(drupal):
+    """
+    Imports categories from Drupal into Zinnia.
 
-        # Set-up some counters.
-        import_count = {}
-        import_count["drupal_total"] = nodes.count()
-        import_count["new"] = 0
-        import_count["existing"] = 0
+    Arguments:
 
-        print "Starting import of blog entries."
+      drupal
+        Drupal database from which the users should be imported. Should be an
+        instance of DrupalDatabase.
 
-        # Process each blog entry.
-        for node in nodes:
-            # Extract the last revision of the blog.
-            revisions = self.session.query(self.NodeRevisions).filter(self.NodeRevisions.nid == node.nid)
+    Returns:
 
-            # Extract blog data.
-            last = revisions.order_by(self.NodeRevisions.vid.desc()).first()
-            body = last.body
-            title = last.title
-            modified = datetime.fromtimestamp(last.timestamp, pytz.UTC)
-            created = datetime.fromtimestamp(node.created, pytz.UTC)
-            user = self.author_mapping[node.uid]
+      Tuple consisting out of two elements. The first element is dictionary with
+      import statistics. The second is a dictionary describing mapping between
+      the Drupal and Zinnia categories, where keys are Drupal category IDs, and
+      values are Zinnia category IDs.
+    """
 
-            # Create the entry if it doesn't exist already.
-            if not Entry.objects.filter(title=title, creation_date=created, last_update=modified).exists():
-                zinnia_entry = Entry(content=body, creation_date=created,
-                                     last_update=modified, title=title,
-                                     status=PUBLISHED, slug=slugify(title))
-                zinnia_entry.save()
-        
-                # Add relations (authors etc).
-                zinnia_entry.authors.add(user)
-                zinnia_entry.sites.add(self.site)
-                zinnia_entry.save()
+    mapping = {}
 
-                # Import tags.
-                zinnia_entry.tags = self.get_tags(last)
-                zinnia_entry.save()
+    # Dictinoary representing hierarchy of Drupal categories. Key corresponds to
+    # child, value corresponds to child's parent.
+    hierarchy = {}
 
-                # Set-up categories for entry.
-                zinnia_entry.categories.add(*[c.id for c in self.get_categories(last)])
-                zinnia_entry.save()
+    # Set-up the statistics.
+    statistics = {
+        "drupal_total": 0,
+        "zinnia_new": 0,
+        "zinnia_existing": 0,
+        }
 
-                # Import comment for an entry.
-                self.import_comments(node, zinnia_entry)
+    # Drupal stores categories within a number of vocabularies. Extract all
+    # vocabularies that are not defining tags.
+    vocabularies = drupal.session.query(drupal.Vocabulary).filter(drupal.Vocabulary.tags!=1)
 
-                import_count["new"] += 1
-                print "Imported entry '%s'" % title
+    # Import the categories from each vocabulary.
+    for vocabulary in vocabularies:
+
+        # Treat vocabulary itself as a category (top-level one).
+        statistics["drupal_total"] += 1
+        category, created = Category.objects.get_or_create(title=vocabulary.name, slug=slugify(vocabulary.name), description=vocabulary.description)
+
+        if created:
+            statistics["zinnia_new"] += 1
+        else:
+            statistics["zinnia_existing"] += 1
+
+        # Since vocabularies are not categories, use the vocabulary _name_ as
+        # identifier instead of primary key (in order to avoid collision with
+        # categories).
+        mapping[vocabulary.name] = category.pk
+
+        # Vocabulary "category" has no parents.
+        hierarchy[vocabulary.name] = 0
+
+        # Look-up the terms that belong to the vocabulary.
+        term_query = drupal.session.query(drupal.TermData).filter(drupal.TermData.vid==vocabulary.vid)
+        statistics["drupal_total"] += term_query.count()
+
+        # Process each term item.
+        for term in term_query:
+            term_parent = drupal.session.query(drupal.TermHierarchy).filter(drupal.TermHierarchy.tid==term.tid).first().parent
+
+            # If this is a top-level category in vocabulary, mark the vocabulary
+            # pseudo-category itself as its parent instead (refer to vocabulary
+            # "category" by its name).
+            if term_parent == 0:
+                term_parent = vocabulary.name
+
+            # Set-up hierarchy information for this category.
+            hierarchy[term.tid] = term_parent
+
+            # Create the category in Zinnia.
+            category, created = Category.objects.get_or_create(title=term.name, slug=slugify(term.name), description=term.description)
+
+            if created:
+                statistics["zinnia_new"] += 1
             else:
-                import_count["existing"] += 1
-                print "Skipping existing entry '%s'" % title
+                statistics["zinnia_existing"] += 1
+
+            # Map the Drupal category to Zinnia category.
+            mapping[term.tid] = category.pk
+
+    # Set-up Zinnia's category hierarchy.
+    for tid, tid_parent in hierarchy.iteritems():
+        if tid_parent != 0:
+            category = Category.objects.get(pk=mapping[tid])
+            category.parent = Category.objects.get(pk=mapping[tid_parent])
+            category.save()
+
+    return statistics, mapping
+
+
+def extract_tags(drupal):
+    """
+    Extracts tags from Drupal database. While being extracted the tags will be
+    stripped of forward slashes ('/'), replacing them with hyphens ('-').
+
+    Tags do not exist in Zinnia as objects of their own, so no creation of tags
+    needs to take place there. This function will mainly allow us to reduce
+    database workload (of traversing Drupal database) by having (id, tag) pairs
+    in a dictionary.
+
+    Arguments:
+
+      drupal
+        Drupal database from which the tags should be extracted. Should be an
+        instance of DrupalDatabase.
+
+    Returns:
+
+      Dictionary mapping the Drupal tag term ID into tag string.
+    """
+
+    tag_mapping = {}
+
+    # Process all vocabularies that are marked to contains tags.
+    for vocabulary in drupal.session.query(drupal.Vocabulary).filter(drupal.Vocabulary.tags==1).all():
+        # Fetch all terms of a tag vocabulary.
+        terms = drupal.session.query(drupal.TermData).filter(drupal.TermData.vid==vocabulary.vid).all()
+        # Set-up mapping for all terms in a vocabulary.
+        for term in terms:
+            # The tags in Zinnia are not allowed to contain slashes.
+            tag_mapping[term.tid] = term.name.replace("/", "-")
+
+    return tag_mapping
+
+
+def import_comments(drupal, drupal_node, zinnia_entry, threaded_comments):
+    """
+    Imports comments from Drupal node into Zinnia entry.
+
+    Arguments:
+
+      drupal
+        Drupal database from which the comments should be extracted. Should be an
+        instance of DrupalDatabase.
+
+      drupal_node
+        Drupal node object from which the comments should be imported.
+
+      zinnia_entry
+        Zinna entry to which the commments should be attached.
+
+      threaded_comments
+        Specify whether the comments should be imported as threaded or note. If
+        set to True, zinnia-threaded-comments application must be installed as
+        well.
+    """
+
+    # Fetch the current Django site.
+    site = Site.objects.get_current()
+
+    # Holds mapping between comment IDs in Drupal and Comment IDs in
+    # Zinnia. This is used later on if setting-up threaded comment parents.
+    comment_mapping = {}
+
+    # Holds information about parent/child relatinships of Drupal comments. Keys
+    # are comment IDs of children, while values are comment IDs of parents.
+    hierarchy = {}
+
+    # Fetch all comments for a specific node, ordering them by creation
+    # timestamps.
+    drupal_comments = drupal.session.query(drupal.Comments).filter(drupal.Comments.nid==drupal_node.nid).order_by(drupal.Comments.timestamp)
+
+    # Set-up some statistics.
+    statistics = {
+        "drupal_total": drupal_comments.count(),
+        "zinnia_new": 0,
+        }
+
+    # Process all comments from relevant Drupal node.
+    for drupal_comment in drupal_comments:
+        comment = Comment.objects.create(comment=drupal_comment.comment,
+                                         ip_address=drupal_comment.hostname,
+                                         submit_date = datetime.fromtimestamp(drupal_comment.timestamp, pytz.UTC),
+                                         #@TODO: Add import of comment status?
+                                         #status
+                                         name=drupal_comment.name,
+                                         email=drupal_comment.mail,
+                                         user_url=drupal_comment.homepage,
+                                         content_object = zinnia_entry,
+                                         site_id = site.pk)
+
+        statistics["zinnia_new"] += 1
+
+        # Store mapping information between Drupal and Zinnia comments (used
+        # later on if setting-up hierarchy for threaded comments).
+        comment_mapping[drupal_comment.cid] = comment.pk
+        # Store parent/child information for threaded comments.
+        hierarchy[drupal_comment.cid] = drupal_comment.pid
+
+    # Update comment parent/child relationships if threaded comments were
+    # enabled.
+    if threaded_comments:
+        for cid, cid_parent in hierarchy.iteritems():
+            if cid_parent != 0:
+                comment = Comment.objects.get(pk=comment_mapping[cid])
+                comment.parent = Comment.objects.get(pk=comment_mapping[cid_parent])
+                comment.save()
         
-        print "Total number of blog entries in Drupal: %d" % import_count["drupal_total"]
-        print "Imported blog entries: %d" % import_count["new"]
-        print "Skipped existing entries: %d" % import_count["existing"]
+    # Fix counters.
+    zinnia_entry.comment_count = zinnia_entry.comments.count()
+    zinnia_entry.pingback_count = zinnia_entry.pingbacks.count()
+    zinnia_entry.trackback_count = zinnia_entry.trackbacks.count()
+    zinnia_entry.save(force_update=True)
 
-    def get_tags(self, version):
-        """
-        Retrives tags for Drupal node revision. The slash character ('/') in a
-        tag will be automatically replaced by a dash ('-'). This is limitation
-        of Django/Zinnia.
+    print "Total number of comments in Drupal: %d" % statistics["drupal_total"]
+    print "Imported comments: %d" % statistics["zinnia_new"]
 
-        Arguments:
-            version - Version of a Drupal node. In most cases this should be the
-            last one available.
 
-        Returns:
-            Comma-delimited tags.
-        """
+def import_content(drupal, user_mapping, category_mapping, tag_mapping, node_type, threaded_comments):
+    """
+    Imports content from Drupal into Zinnia.
 
-        version_terms = self.session.query(self.TermNode).filter(self.TermNode.nid==version.nid, self.TermNode.vid==version.vid).all()
+    Arguments:
 
-        tags = ",".join([self.tag_mapping[t.tid] for t in version_terms if t.tid in self.tag_mapping])
+      drupal
+        Drupal database from which the content should be imported. Should be an
+        instance of DrupalDatabase.
 
-        return tags
+      user_mapping
+        Mapping between Drupal user ID's and Zinnia user ID's. Generated by
+        import_users() function.
 
-    def get_categories(self, version):
-        """
-        Retrives a list of categories from Zinnia corresponding to the provided
-        Drupal node version. Categories have to be imported before performing
-        this step.
+      category_mapping
+        Mapping between Drupal category ID's and Zinnia category ID's. Generated
+        by import_categories() function.
 
-        Arguments:
-            version - Version of a Drupal node. In most cases this should be the
-            last one available.
+      tag_mapping
+        Mapping between Drupal tag ID's and Zinnia tag strings. Generated by
+        extract_tags() function.
 
-        Returns:
-            List of Zinnia categories.
-        """
+      node_type
+        Drupal node type that should be processed. Only the nodes belonging to
+        the specified node type will be processed.
 
-        version_categories_query = self.session.query(self.TermNode).filter(self.TermNode.nid==version.nid, self.TermNode.vid==version.vid)
-        version_categories = [v.tid for v in version_categories_query if v.tid in self.zinnia_category_mapping]
+      threaded_comments
+        Specify whethere the comments should be imported as threaded or not. If
+        set to True, zinnia-threaded-comments application must be installed as
+        well.
 
-        return Category.objects.filter(pk__in=[self.zinnia_category_mapping[tid] for tid in version_categories])
+    Returns:
 
-    def import_categories(self):
-        """
-        Imports the categories from Drupal into Zinnia. This includes full
-        information about the category hierarchy.
+      Dictionary with import statistics.
+    """
 
-        The method will set-up a number of required properties that are used
-        later on for assigning blog entries to correct categories.
-        """
+    # Get a list of all nodes of specific type, sorting them by date of
+    # creation.
+    nodes = drupal.session.query(drupal.Node).filter(drupal.Node.type == node_type,
+                                                     drupal.Node.uid.in_(user_mapping.keys())).order_by(drupal.Node.created)
 
-        # Holds mapping between term IDs in Drupal and Zinnia Category IDs. This
-        # allows for proper processing of identically-named categories across
-        # multiple category hierarchy trees. Pairs are stored as (tid,
-        # Category.id).
-        self.zinnia_category_mapping = {}
+    # Set-up statistics dictionary.
+    statistics = {
+        "drupal_total": nodes.count(),
+        "zinnia_new": 0,
+        "zinnia_existing": 0,
+        }
 
-        # Holds information about parent/child relatinships of Drupal categories
-        # as (tid, tid) key/value pair.
-        category_parents = {}
+    # Process each node.
+    for node in nodes:
+        # Extract the last revision of the node.
+        revisions = drupal.session.query(drupal.NodeRevisions).filter(drupal.NodeRevisions.nid == node.nid)
 
-        # Fetch all category vocabularies.
-        vocabularies = self.session.query(self.Vocabulary).filter(self.Vocabulary.tags!=1)
+        # Extract node data.
+        last = revisions.order_by(drupal.NodeRevisions.vid.desc()).first()
+        body = last.body
+        title = last.title
+        modified = datetime.fromtimestamp(last.timestamp, pytz.UTC)
+        created = datetime.fromtimestamp(node.created, pytz.UTC)
+        user = user_mapping[node.uid]
 
-        # Set-up some counters.
-        import_count = {}
-        import_count["drupal_total"] = 0
-        import_count["new"] = 0
+        # Create the entry if it doesn't exist already.
+        if not Entry.objects.filter(title=title, creation_date=created, last_update=modified).exists():
+            zinnia_entry = Entry.objects.create(content=body, creation_date=created,
+                                                last_update=modified, title=title,
+                                                status=PUBLISHED, slug=slugify(title))
+    
+            # Add relations (authors etc).
+            zinnia_entry.authors.add(user)
+            zinnia_entry.sites.add(Site.objects.get_current())
+            zinnia_entry.save()
 
-        print "Starting import of categories."
+            # Import tags.
+            version_tags = drupal.session.query(drupal.TermNode).filter(drupal.TermNode.nid==last.nid, drupal.TermNode.vid==last.vid).all()
+            zinnia_entry.tags = ",".join([tag_mapping[t.tid] for t in version_tags if t.tid in tag_mapping])
+            zinnia_entry.save()
 
-        # Iterate over Drupal vocabularies. This will map into Zinnia
-        # categories.
-        for vocabulary in vocabularies:
-            # Look-up the terms that belong to the vocabulary.
-            term_query = self.session.query(self.TermData).filter(self.TermData.vid==vocabulary.vid)
-            import_count["drupal_total"] += term_query.count()
-            # Process each term item.
-            for term in term_query:
-                drupal_parent_id = self.session.query(self.TermHierarchy).filter(self.TermHierarchy.tid==term.tid).first().parent 
+            # Set-up categories for entry.
+            categories_query = drupal.session.query(drupal.TermNode).filter(drupal.TermNode.nid==last.nid, drupal.TermNode.vid==last.vid)
+            categories = [category_mapping[v.tid] for v in categories_query if v.tid in category_mapping]
+            zinnia_entry.categories.add(*[c for c in categories])
+            zinnia_entry.save()
 
-                # Construct a unique slug.
-                slug_base = slugify(term.name)
-                slug_number = 0
-                slug = slug_base
-                while Category.objects.filter(slug=slug).exists():
-                    number += 1
-                    slug = "%s%d" % (slug_base, number)
+            # Import comments for an entry.
+            import_comments(drupal, node, zinnia_entry, threaded_comments)
 
-                # Create the category.
-                category = Category(title=term.name, description=term.description, slug = slug)
-                category.save()
-
-                print "Added category '%s' with slug '%s'" % (term.name, slug)
-                import_count["new"] += 1
-
-                self.zinnia_category_mapping[term.tid] = category.pk
-                category_parents[term.tid] = drupal_parent_id
-
-        # Set-up Zinnia's category hierarchy.
-        for tid, tid_parent in category_parents.iteritems():
-            if tid_parent != 0:
-                category = Category.objects.get(pk=self.zinnia_category_mapping[tid])
-                category.parent = Category.objects.get(pk=self.zinnia_category_mapping[tid_parent])
-                category.save()
-
-        print "Total number of categories in Drupal: %d" % import_count["drupal_total"]
-        print "Imported categories: %d" % import_count["new"]
-
-    def import_comments(self, drupal_node, zinnia_entry):
-        """
-        Imports comments for a node from sepcified Drupal node into Zinnia
-        entry.
-
-        Arguments:
-            drupal_node - Drupal node object from which the comments should be
-            imported.
-            zinnia_entry - Zinna entry to which the commments should be
-            attached.
-        """
-
-        # Holds mapping between comment IDs in Drupal and Zinnia Comment
-        # IDs. This is used later on if setting-up threaded comment parents.
-        zinnia_comment_mapping = {}
-
-        # Holds information about parent/child relatinships of Drupal comments
-        # as (cid, cid) key/value pair.
-        comment_parents = {}
-
-        drupal_comments = self.session.query(self.Comments).filter(self.Comments.nid==drupal_node.nid).order_by(self.Comments.timestamp)
-
-        # Set-up some counters.
-        import_count = {}
-        import_count["drupal_total"] = drupal_comments.count()
-        import_count["new"] = 0
-
-        print "Staring import of comments for '%s'" % drupal_node.title
-
-        # Process all of the node's comments.
-        for drupal_comment in drupal_comments:
-            comment = Comment(comment=drupal_comment.comment,
-                              ip_address=drupal_comment.hostname,
-                              submit_date = datetime.fromtimestamp(drupal_comment.timestamp, pytz.UTC),
-                              #@TODO: Add import of comment status?
-                              #status
-                              name=drupal_comment.name,
-                              email=drupal_comment.mail,
-                              user_url=drupal_comment.homepage,
-                              content_object = zinnia_entry,
-                              site_id = self.site.pk)
-            comment.save()
-
-            import_count["new"] += 1
-
-            # Store parent/child information for threaded comments.
-            zinnia_comment_mapping[drupal_comment.cid] = comment.pk
-            comment_parents[drupal_comment.cid] = drupal_comment.pid
-
-        # Update comment parent/child relationships if threaded comments were
-        # enabled.
-        if self.threaded_comments:
-            for cid, cid_parent in comment_parents.iteritems():
-                if cid_parent != 0:
-                    comment = Comment.objects.get(pk=zinnia_comment_mapping[cid])
-                    comment.parent = Comment.objects.get(pk=zinnia_comment_mapping[cid_parent])
-                    comment.save()
-            
-        # Update the entry so that comment count and visibility will be fixed.
-        zinnia_entry.comment_count = zinnia_entry.comments.count()
-        zinnia_entry.pingback_count = zinnia_entry.pingbacks.count()
-        zinnia_entry.trackback_count = zinnia_entry.trackbacks.count()
-        zinnia_entry.save(force_update=True)
-
-        print "Total number of comments in Drupal: %d" % import_count["drupal_total"]
-        print "Imported comments: %d" % import_count["new"]
+            statistics["zinnia_new"] += 1
+            print "Imported entry '%s'" % title
+        else:
+            statistics["zinnia_existing"] += 1
+            print "Skipping existing entry '%s'" % title
+    
+    print "Total number of blog entries in Drupal: %d" % statistics["drupal_total"]
+    print "Imported blog entries: %d" % statistics["zinnia_new"]
+    print "Skipped existing entries: %d" % statistics["zinnia_existing"]
 
 
 ###########
@@ -525,39 +576,44 @@ class Command(LabelCommand):
     """
 
     help = """
-Import a Drupal blog into Zinnia.
+Imports Drupal content into Zinnia.
 
 The command will import the following:
 
     - User information (username and mail only).
+    - Categories.
+    - Node content.
+    - Node comments (threaded, if using zinnia_threaded_comments).
 
-Currenlty the script has the following limitations:
+Currently the script has the following limitations:
 
     - No conversion of additional user information is performed.
     - No conversion of formatting is performed. Content is copied as-is.
     - Supports only MySQL-compatible database.
     - Revision history is not preserved (Django Blog Zinnia does not support
-      revision history).
+      revision history). Only the latest/current revision will be imported.
 """
 
     option_list = LabelCommand.option_list + (
         make_option("-H", "--database-hostname", type="string", default="localhost",
-                    help="Hostname of database server providing the Drupal database."),
+                    help="Hostname of database server providing the Drupal database. Default is 'localhost'."),
         make_option("-p", "--database-port", type="int", default=3306,
-                    help="TCP port at which the database server is listening."),
+                    help="TCP port at which the database server is listening. Default is '3306'."),
         make_option("-u", "--database-username", type="string", default="root",
-                    help="Username that should be used for connecting to database server."),
+                    help="Username that should be used for connecting to database server. Default is 'root'."),
         make_option("-P", "--database-password", type="string", default=None,
                     dest="database_password_file",
-                    help="Password for the database username specified. Read interactively if not set"),
+                    help="Path to file containing the password for specified database username. If not set (default), the password will be read interactively."),
         make_option("-n", "--node-type", type="string", default="blog",
-                    help="Drupal Node type that should be processed."),
-        make_option("-U", "--users", type="string", action="callback",
-                    callback=create_mappingaction("users"), default=dict(),
-                    help="List of Drupal users that should be imported, including their mapping to Zinnia users. Default is to import all user blogs with preserved usernames."),
+                    help="Drupal Node type that should be processed. Default is 'blog'."),
+        make_option("-m", "--user-mapping", type="string", action="callback",
+                    callback=create_mappingaction("user_mapping"), default=dict(),
+                    help="Mapping of Drupal usernames to Zinnia usernames. Format is 'duser1=zuser1:duser2=zuser2:...:dusern=zusern'. Default is to use same username as in Drupal."),
+        make_option("-U", "--users", type="string", default=None,
+                    help="Comma-separated list of Drupal users that should be imported, including user-created content. Default is to import content from all users."),
         make_option("-t", "--threaded-comments", action="store_true",
                     default=False, dest="threaded_comments",
-                    help="Import comments while preserving threading information. Requires zinnia-threaded-comments application."),
+                    help="Import comments while preserving threading information. Requires zinnia-threaded-comments application. Default is not to use threaded comments."),
         )
     
     def handle_label(self, database_name, **options):
@@ -567,15 +623,24 @@ Currenlty the script has the following limitations:
         else:
             options['database_password'] = getpass.getpass("Database password for '%s'@'%s': " % (options['database_username'], database_name))
 
-        # Set-up SQLAlchemy.
+        # Set-up SQLAlchemy ORM.
         database_connection_url = "mysql://%s:%s@%s/%s" % (urllib.quote(options['database_username']),
                                                            urllib.quote(options['database_password']),
                                                            urllib.quote(options['database_hostname']),
                                                            urllib.quote(database_name))
         engine = create_engine(database_connection_url)
+        drupal = DrupalDatabase(engine)
 
-        importer = DrupalToZinnia(engine, options['node_type'], options['users'], options['threaded_comments'])
-        importer.import_users()
-        importer.import_categories()
-        importer.import_content()
+        # Create list of users that should be imported.
+        users = options["users"]
+        if users:
+            users = users.split(",")
 
+        # Import the users.
+        user_stats, user_mapping = import_users(drupal, users = users, custom_mapping = options["user_mapping"])
+        # Import the categories.
+        category_stats, category_mapping = import_categories(drupal)
+        # Extract the tag mapping.
+        tag_mapping = extract_tags(drupal)
+        # Finally, import the actual content.
+        content_stats = import_content(drupal, user_mapping, category_mapping, tag_mapping, options['node_type'], options["threaded_comments"])
