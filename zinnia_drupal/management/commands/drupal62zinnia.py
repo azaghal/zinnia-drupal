@@ -35,10 +35,10 @@ from zinnia.managers import PUBLISHED
 from zinnia.signals import disconnect_entry_signals
 from zinnia.signals import disconnect_discussion_signals
 
+
 #########################################
 # Helper functions for argument parsing #
 #########################################
-
 def create_mappingaction(argument_name):
     """
     Wrapper function for generating a MappingAction that will store the parsed
@@ -123,16 +123,14 @@ class DrupalDatabase(object):
         Base = declarative_base(self.engine)
 
         # Declare Drupal ORM classes.
-
         class Node(Base):
             """
             For accessing Drupal's "node" table. This table contains mainly metadata
             about a node.
             """
-            
+
             __tablename__ = 'node'
             __table_args__ = {'autoload': True}
-
 
         class NodeRevisions(Base):
             """
@@ -143,16 +141,14 @@ class DrupalDatabase(object):
             __tablename__ = 'node_revisions'
             __table_args__ = {'autoload': True}
 
-
         class Users(Base):
             """
             For accessing Drupal's "users" table. This table contains information about
             users.
             """
-            
+
             __tablename__ = 'users'
             __table_args__ = {'autoload': True}
-            
 
         class Vocabulary(Base):
             """
@@ -163,7 +159,6 @@ class DrupalDatabase(object):
             __tablename__ = 'vocabulary'
             __table_args__ = {'autoload': True}
 
-
         class TermNode(Base):
             """
             For accessing Drupal's "term_node" table. This table contains information about
@@ -172,7 +167,6 @@ class DrupalDatabase(object):
 
             __tablename__ = 'term_node'
             __table_args__ = {'autoload': True}
-
 
         class TermData(Base):
             """
@@ -183,7 +177,6 @@ class DrupalDatabase(object):
             __tablename__ = 'term_data'
             __table_args__ = {'autoload': True}
 
-
         class TermHierarchy(Base):
             """
             For accessing Drupal's "term_hierarchy" table. This table contains data
@@ -193,7 +186,6 @@ class DrupalDatabase(object):
             __tablename__ = 'term_hierarchy'
             __table_args__ = {'autoload': True}
 
-
         class Comments(Base):
             """
             For accessing Drupal's "comments" table. This table contains comment data.
@@ -201,7 +193,6 @@ class DrupalDatabase(object):
 
             __tablename__ = 'comments'
             __table_args__ = {'autoload': True}
-
 
         # Easier access to SQLAlchemy ORM.
         self.Node = Node
@@ -214,7 +205,7 @@ class DrupalDatabase(object):
         self.Comments = Comments
 
 
-def import_users(drupal, users = None, custom_mapping = None):
+def import_users(drupal, users=None, custom_mapping=None):
     """
     Imports the requested users from Drupal database, taking into account any
     desired custom mappings between usernames. Generates a mapping dictionary
@@ -255,7 +246,7 @@ def import_users(drupal, users = None, custom_mapping = None):
     if users:
         drupal_users = drupal.session.query(drupal.Users).filter(drupal.Users.name.in_(users))
     else:
-        drupal_users = drupal.session.query(drupal.Users).filter(drupal.Users.name!="")
+        drupal_users = drupal.session.query(drupal.Users).filter(drupal.Users.name != "")
 
     # Set-up the statistics.
     statistics = {
@@ -332,7 +323,7 @@ def import_categories(drupal):
     # Drupal stores categories within a number of vocabularies. Extract all
     # vocabularies that are not defining tags (that is, extract all category
     # vocabularies).
-    vocabularies = drupal.session.query(drupal.Vocabulary).filter(drupal.Vocabulary.tags!=1)
+    vocabularies = drupal.session.query(drupal.Vocabulary).filter(drupal.Vocabulary.tags != 1)
 
     # Import the categories from each vocabulary.
     for vocabulary in vocabularies:
@@ -357,12 +348,12 @@ def import_categories(drupal):
         hierarchy[vocabulary.name] = 0
 
         # Look-up the terms that belong to the vocabulary.
-        term_query = drupal.session.query(drupal.TermData).filter(drupal.TermData.vid==vocabulary.vid)
+        term_query = drupal.session.query(drupal.TermData).filter(drupal.TermData.vid == vocabulary.vid)
         statistics["drupal_total"] += term_query.count()
 
         # Process each term item.
         for term in term_query:
-            term_parent = drupal.session.query(drupal.TermHierarchy).filter(drupal.TermHierarchy.tid==term.tid).first().parent
+            term_parent = drupal.session.query(drupal.TermHierarchy).filter(drupal.TermHierarchy.tid == term.tid).first().parent
 
             # If this is a top-level category in vocabulary, mark the vocabulary
             # pseudo-category itself as its parent instead (refer to vocabulary
@@ -419,9 +410,9 @@ def extract_tags(drupal):
     tag_mapping = {}
 
     # Process all vocabularies that are marked to contains tags.
-    for vocabulary in drupal.session.query(drupal.Vocabulary).filter(drupal.Vocabulary.tags==1).all():
+    for vocabulary in drupal.session.query(drupal.Vocabulary).filter(drupal.Vocabulary.tags == 1).all():
         # Fetch all terms of a tag vocabulary.
-        terms = drupal.session.query(drupal.TermData).filter(drupal.TermData.vid==vocabulary.vid).all()
+        terms = drupal.session.query(drupal.TermData).filter(drupal.TermData.vid == vocabulary.vid).all()
         # Set-up mapping for all terms in a vocabulary.
         for term in terms:
             # The tags in Zinnia are not allowed to contain slashes.
@@ -471,7 +462,7 @@ def import_comments(drupal, drupal_node, zinnia_entry, threaded_comments):
 
     # Fetch all comments for a specific node, ordering them by creation
     # timestamps.
-    drupal_comments = drupal.session.query(drupal.Comments).filter(drupal.Comments.nid==drupal_node.nid).order_by(drupal.Comments.timestamp)
+    drupal_comments = drupal.session.query(drupal.Comments).filter(drupal.Comments.nid == drupal_node.nid).order_by(drupal.Comments.timestamp)
 
     # Set-up some statistics.
     statistics = {
@@ -485,15 +476,15 @@ def import_comments(drupal, drupal_node, zinnia_entry, threaded_comments):
         # Try to fetch existing, or create new comment in Zinnia.
         comment, created = Comment.objects.get_or_create(comment=drupal_comment.comment,
                                                          ip_address=drupal_comment.hostname,
-                                                         submit_date = datetime.fromtimestamp(drupal_comment.timestamp, pytz.UTC),
+                                                         submit_date=datetime.fromtimestamp(drupal_comment.timestamp, pytz.UTC),
                                                          #@TODO: Add import of comment status?
                                                          #status
                                                          user_name=drupal_comment.name,
                                                          user_email=drupal_comment.mail,
                                                          user_url=drupal_comment.homepage,
-                                                         object_pk = zinnia_entry.pk,
-                                                         site_id = site.pk,
-                                                         content_type = ContentType.objects.get_for_model(Entry),)
+                                                         object_pk=zinnia_entry.pk,
+                                                         site_id=site.pk,
+                                                         content_type=ContentType.objects.get_for_model(Entry),)
 
         if created:
             statistics["zinnia_new"] += 1
@@ -514,7 +505,7 @@ def import_comments(drupal, drupal_node, zinnia_entry, threaded_comments):
                 comment = Comment.objects.get(pk=comment_mapping[cid])
                 comment.parent = Comment.objects.get(pk=comment_mapping[cid_parent])
                 comment.save()
-        
+
     # Fix counters.
     zinnia_entry.comment_count = zinnia_entry.comments.count()
     zinnia_entry.pingback_count = zinnia_entry.pingbacks.count()
@@ -557,7 +548,7 @@ def import_content(drupal, user_mapping, category_mapping, tag_mapping, node_typ
         well.
 
     Returns:
- 
+
       Dictionary with import statistics (keys 'drupal_total', 'zinnia_new', and
       'zinnia_existing').
     """
@@ -599,12 +590,12 @@ def import_content(drupal, user_mapping, category_mapping, tag_mapping, node_typ
             zinnia_entry.save()
 
             # Import tags.
-            version_tags = drupal.session.query(drupal.TermNode).filter(drupal.TermNode.nid==last.nid, drupal.TermNode.vid==last.vid).all()
+            version_tags = drupal.session.query(drupal.TermNode).filter(drupal.TermNode.nid == last.nid, drupal.TermNode.vid == last.vid).all()
             zinnia_entry.tags = ",".join([tag_mapping[t.tid] for t in version_tags if t.tid in tag_mapping])
             zinnia_entry.save()
 
             # Set-up categories for entry.
-            categories_query = drupal.session.query(drupal.TermNode).filter(drupal.TermNode.nid==last.nid, drupal.TermNode.vid==last.vid)
+            categories_query = drupal.session.query(drupal.TermNode).filter(drupal.TermNode.nid == last.nid, drupal.TermNode.vid == last.vid)
             categories = [category_mapping[v.tid] for v in categories_query if v.tid in category_mapping]
             zinnia_entry.categories.add(*[c for c in categories])
             zinnia_entry.save()
@@ -672,7 +663,7 @@ Currently the script has the following limitations:
                     default=False, dest="threaded_comments",
                     help="Import comments while preserving threading information. Requires zinnia-threaded-comments application. Default is not to use threaded comments."),
         )
-    
+
     def handle_label(self, database_name, **options):
         # Read the password for Drupal database if it wasn't provided within a file.
         if options['database_password_file']:
@@ -694,7 +685,7 @@ Currently the script has the following limitations:
             users = users.split(",")
 
         # Import the users.
-        user_stats, user_mapping = import_users(drupal, users = users, custom_mapping = options["user_mapping"])
+        user_stats, user_mapping = import_users(drupal, users=users, custom_mapping=options["user_mapping"])
         # Import the categories.
         category_stats, category_mapping = import_categories(drupal)
         # Extract the tag mapping.
@@ -720,4 +711,3 @@ Currently the script has the following limitations:
         print "======================"
         for key, value in content_stats.iteritems():
             print "%s: %s" % (key, value)
-
