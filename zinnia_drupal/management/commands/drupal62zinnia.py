@@ -683,6 +683,10 @@ Currently the script has the following limitations:
         if users:
             users = users.split(",")
 
+        # Disconnect Zinnia signals.
+        disconnect_discussion_signals()
+        disconnect_entry_signals()
+
         # Import the users.
         user_stats, user_mapping = import_users(drupal, users=users, custom_mapping=options["user_mapping"])
         # Import the categories.
