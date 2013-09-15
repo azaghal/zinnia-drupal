@@ -1,16 +1,27 @@
-.. Zinnia Drupal documentation master file, created by
-   sphinx-quickstart on Fri Aug 30 20:21:46 2013.
-   You can adapt this file completely to your liking, but it should at least
-   contain the root `toctree` directive.
+Zinnia Drupal documentation
+===========================
 
-Welcome to Zinnia Drupal's documentation!
-=========================================
+Zinnia Drupal is a helper application for Django Blog Zinnia that provides a
+custom management command for importing Drupal blogs into Zinnia.
+
+
+Support
+-------
+
+In case of problems with the application, please do not hesitate to contact the
+author at **drupal.zinnia (at) majic.rs**. The project is hosted on Github:
+
+* https://github.com/azaghal/zinnia-drupal
 
 Contents:
 
 .. toctree::
    :maxdepth: 2
 
+   about
+   installation
+   usage
+   releasenotes
 
 
 Indices and tables
