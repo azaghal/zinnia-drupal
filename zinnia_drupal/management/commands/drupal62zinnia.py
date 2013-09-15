@@ -477,8 +477,7 @@ def import_comments(drupal, drupal_node, zinnia_entry, threaded_comments):
         comment, created = Comment.objects.get_or_create(comment=drupal_comment.comment,
                                                          ip_address=drupal_comment.hostname,
                                                          submit_date=datetime.fromtimestamp(drupal_comment.timestamp, pytz.UTC),
-                                                         #@TODO: Add import of comment status?
-                                                         #status
+                                                         is_public=True if drupal_comment.status == 0 else False,
                                                          user_name=drupal_comment.name,
                                                          user_email=drupal_comment.mail,
                                                          user_url=drupal_comment.homepage,
