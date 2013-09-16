@@ -267,10 +267,11 @@ def import_users(drupal, users=None, custom_mapping=None):
             print "User already exists: %s" % username
             statistics["zinnia_existing"] += 1
         except Author.DoesNotExist:
-            # "pass" is a reserved keyword in Python, so we must use the getattr
-            # here.
-            author = Author.objects.create_user(username, drupal_user.mail,
-                                                getattr(drupal_user, "pass"))
+            author = Author.objects.create_user(username, drupal_user.mail)
+            # Set the user password. "pass" is a reserved keyword in Python, so
+            # we must use the getattr here.
+            author.password = "md5$$%s" % getattr(drupal_user, "pass")
+            author.is_staff = True
             author.save()
             print "Added user: %s" % username
             statistics["zinnia_new"] += 1
