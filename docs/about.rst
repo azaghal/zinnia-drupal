@@ -24,7 +24,7 @@ Zinnia Drupal has the following features:
   * Change username during import.
 * Imports Drupal vocabularies, converting them into Zinnia categories.
   * Support for both regular and tag-based vocabularies.
-  * Hierarchical vocabularies are preserved.
+  * Hierarchy is preserved.
   * Vocabulary itself becomes a top-level category.
 * Imports Drupal content as Zinnia blog entries.
 * Imports Drupal comments.
@@ -35,13 +35,17 @@ There is a couple of limitations in the way the import is performed. Make sure
 that you are well aware of those limitations before starting the migration from
 Drupal:
 
-* Only the MySQL database is supported (it should be easy to extend for other
-  database, code is SQLAlchemy-based).
+* Only the MySQL database is supported at the moment. Despire this, it should be
+  easy to extend the code other database since SQLAlchemy is used for accessing
+  the Drupal database.
 * Non-tag Drupal vocabularies must contain terms that have unique
   names. The import code will not distinguish between same-named terms coming
   from different vocabularies.
 * Only username, password, and e-mail is imported for users. I.e. no other
   custom information from users will be imported.
+* Users will not be granted any permissions in Zinnia beyond being marked as
+  staff. I.e. the users won't be able to create new entries in Zinnia before
+  being granted appropriate privileges.
 * No formatting conversion is performed. Content is imported as-is.
 * Revision history is not preserved (Django Blog Zinnia does not support
   revision history). Only the latest/current revision will be imported.

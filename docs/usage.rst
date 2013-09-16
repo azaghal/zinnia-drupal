@@ -22,7 +22,7 @@ command is run.
 
 The following options are available (in addition to standard ones):
 
-``--database-hostname|-H database_hostname``
+``--database-hostname|-H DATABASE_HOSTNAME``
   Hostname of database server providing the Drupal database. Default is
   ``localhost``.
 
@@ -70,8 +70,9 @@ Import all blog entries for all users, but map user ``John Doe`` to user
 
   python manage.py drupal62zinnia -u dbuser -m 'John Doe=john' drupaldb
 
-Import all static pages for all users, connecting to external database server
-listening on non-default port, and also use threaded comments::
+Import all static pages for all users (treat them as blog entries), connecting
+to external database server listening on non-default port, and also use threaded
+comments::
 
   python manage.py drupal62zinnia -H db.example.com -p 3307 -u dbuser -n page -t drupaldb
 

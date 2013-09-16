@@ -1,8 +1,8 @@
 Release Notes
 =============
 
-Zinnia Drupal
--------------
+0.1
+---
 
 Initial relase of Zinnia Drupal. Contains full support for:
 

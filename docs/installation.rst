@@ -1,15 +1,26 @@
 Installation
 ============
 
-Django Conntrackt can be installed through one of the following methods:
+Zinnia Drupal can be installed through one of the following methods:
 
 * Using *pip*, which is the easiest and recommended way for production websites.
 
+Requirements
+------------
+
+In order to use Zinnia Drupal it's necessary to install and configure Django
+Blog Zinnia itself. There's no special requirements for the import application,
+and standard Zinnia documentation should be followed.
+
+Import of threaded comments is possible as well (preserving the hierarchy), but
+this requires `Zinnia Threaded Comments
+<https://github.com/Fantomas42/zinnia-threaded-comments/>`_. Otherwise the
+comments will be imported, but without information about threads.
 
 Using pip
 ---------
 
-In order to install latest stable release of Zinnia Drupal using *pip*, use the
+In order to install latest stable release of Zinnia Drupal using *pip*, run the
 following command::
 
   pip install zinnia_drupal
@@ -40,7 +51,10 @@ Once Drupal Zinnia has been installed, you need to perform the following steps
 in order to make it available inside of your Django Blog Zinnia project:
 
 #. Edit your project's settings configuration file (``settings.py``), and update
-   the ``INSTALLED_APPS`` to include application ``drupal_zinnia``.
+   the ``INSTALLED_APPS`` to include application ``drupal_zinnia``. Order does
+   not matter.
 
 After this you will have :ref:`additional management commands available <usage>`
-in your Django Blog Zinnia project.
+in your Django Blog Zinnia project that can be used for importing data from
+Drupal.
+
