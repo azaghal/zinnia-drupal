@@ -9,7 +9,7 @@ Support
 -------
 
 In case of problems with the application, please do not hesitate to contact the
-author at **drupal.zinnia (at) majic.rs**. The application itself is hosted on
+author at **zinnia.drupal (at) majic.rs**. The application itself is hosted on
 Github:
 
 * https://github.com/azaghal/zinnia-drupal

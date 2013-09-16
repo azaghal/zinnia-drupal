@@ -28,7 +28,7 @@ following command::
 In order to install the latest development version of Zinnia Drupal from Github,
 use the following command::
 
-  pip install -e git+https://github.com/azaghal/drupal-zinnia#egg=drupal_zinnia
+  pip install -e git+https://github.com/azaghal/zinnia-drupal#egg=zinnia_drupal
 
 .. warning::
 
@@ -47,11 +47,11 @@ After this you should proceed to :ref:`configure your Django installation <confi
 Configuring your Django installation
 ====================================
 
-Once Drupal Zinnia has been installed, you need to perform the following steps
+Once Zinnia Drupal has been installed, you need to perform the following steps
 in order to make it available inside of your Django Blog Zinnia project:
 
 #. Edit your project's settings configuration file (``settings.py``), and update
-   the ``INSTALLED_APPS`` to include application ``drupal_zinnia``. Order does
+   the ``INSTALLED_APPS`` to include application ``zinnia_drupal``. Order does
    not matter.
 
 After this you will have :ref:`additional management commands available <usage>`

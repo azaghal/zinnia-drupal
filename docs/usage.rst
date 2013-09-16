@@ -3,7 +3,7 @@
 Usage
 =====
 
-Drupal Zinnia provides custom management commands for importing blogs from
+Zinnia Drupal provides custom management commands for importing blogs from
 Drupal database. The commands are:
 
 * ``drupal62zinnia``, for importing users, categories, content, and comments
