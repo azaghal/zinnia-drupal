@@ -12,7 +12,7 @@ os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
 setup(
     name='zinnia-drupal',
     version='0.1.2',
-    packages=['zinnia_drupal'],
+    packages=['zinnia_drupal', 'zinnia_drupal.management', 'zinnia_drupal.management.commands'],
     include_package_data=True,
     license='BSD',  # example license
     description='Helper application for importing content from Drupal database into Zinnia.',
