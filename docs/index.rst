@@ -1,8 +1,8 @@
 Zinnia Drupal documentation
 ===========================
 
-Zinnia Drupal is a utility application for importing Drupal blog into Django
-Blog Zinnia.
+Zinnia Drupal is a utility application for importing one or more Drupal blogs
+into Django Blog Zinnia.
 
 
 Support
