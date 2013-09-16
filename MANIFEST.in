@@ -1,5 +1,9 @@
+recursive-include docs *
 include LICENSE
+include MANIFEST.in
 include README.rst
 recursive-include requirements *
-recursive-include docs *
+include setup.py
+recursive-include zinnia_drupal *
 prune docs/_build
+exclude tmp/
