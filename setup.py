@@ -1,10 +1,11 @@
 import os
+import pip
+
 from setuptools import setup
-from pip.req import parse_requirements
 
 README = open(os.path.join(os.path.dirname(__file__), 'README.rst')).read()
-INSTALL_REQUIREMENTS = [str(r.req) for r in parse_requirements("requirements/production.txt")]
-TEST_REQUIREMENTS = [str(r.req) for r in parse_requirements("requirements/test.txt")]
+INSTALL_REQUIREMENTS = [str(r.req) for r in pip.req.parse_requirements("requirements/production.txt", session=pip.download.PipSession())]
+TEST_REQUIREMENTS = [str(r.req) for r in pip.req.parse_requirements("requirements/test.txt", session=pip.download.PipSession())]
 
 # allow setup.py to be run from any path
 os.chdir(os.path.normpath(os.path.join(os.path.abspath(__file__), os.pardir)))
