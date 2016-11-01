@@ -1,5 +1,5 @@
 # Argument parsing/user input.
-from optparse import make_option
+import argparse
 import getpass
 
 # Timestamp and date processing.
@@ -15,15 +15,14 @@ from sqlalchemy.orm import sessionmaker
 import urllib
 
 # Django imports.
-from django.core.management.base import LabelCommand
+from django.core.management.base import BaseCommand
 from django.template.defaultfilters import slugify
-from django.db import IntegrityError
+from django.db import IntegrityError, transaction
 from django.contrib.contenttypes.models import ContentType
 
 # Django models.
 from django.contrib.sites.models import Site
-from django.contrib.comments import get_model as get_comment_model
-Comment = get_comment_model()
+from django_comments import get_model as get_comment_model
 
 # Zinnia models.
 from zinnia.models import Author
@@ -35,47 +34,41 @@ from zinnia.managers import PUBLISHED
 from zinnia.signals import disconnect_entry_signals
 from zinnia.signals import disconnect_discussion_signals
 
+# Retrieve the model used for comments.
+Comment = get_comment_model()
+
 
 #########################################
 # Helper functions for argument parsing #
 #########################################
-def create_mappingaction(argument_name):
+class MappingAction(argparse.Action):
     """
-    Wrapper function for generating a MappingAction that will store the parsed
-    data under specified argument_name under parser's options.
+    Custom optparse action for processing arguments of format:
 
-    Arguments:
-        - argument_name - Name of the argument where the parsed data will be
-          stored.
+    arg1[=maparg1]:arg2[=maparg2]:...:argN[=mapargN]
 
-    Returns:
-        A mappingaction function.
+    The action can be used for adding a dictionary to the specified namespace
+    where the keys are arg1, arg2, ..., argN, and values are maparg1, maparg2,
+    ..., mapargN.
+
+    Specifying the maparg mapping is optional. When not specified, the action
+    will use the value of key. I.e. if you specify arg1=maparg1:arg2, resulting
+    dictionary will be {arg1: maparg1, arg2: arg2}.
     """
 
-    def mappingaction(option, option_string, value, parser, argument_name=argument_name):
-        """
-        Custom optparse action for processing arguments of format:
+    def __call__(self, parser, namespace, values, option_string=None):
 
-        arg1[=maparg1]:arg2[=maparg2]:...:argN[=mapargN]
+        # Set-up an empty dictinoary if nothing has been passed-in already.
+        if not getattr(namespace, self.dest):
+            setattr(namespace, self.dest, dict())
 
-        The action can be used for adding a dictionary to the specified
-        namespace where the keys are arg1, arg2, ..., argN, and values are
-        maparg1, maparg2, ..., mapargN.
-
-        Specifying the maparg mapping is optional. When not specified, the
-        action will use the value of key.
-        """
-
-        if not getattr(parser.values, argument_name):
-            setattr(parser.values, argument_name, dict())
-        for mapping in value.split(":"):
+        # Process the provided mappings, and populate the namespace.
+        for mapping in values.split(":"):
             if "=" in mapping:
                 key, value = mapping.split("=", 1)
-                getattr(parser.values, argument_name)[key] = value
+                getattr(namespace, self.dest)[key] = value
             else:
-                getattr(parser.values, argument_name)[mapping] = mapping
-
-    return mappingaction
+                getattr(namespace, self.dest)[mapping] = mapping
 
 
 class DrupalDatabase(object):
@@ -580,6 +573,7 @@ def import_content(drupal, user_mapping, category_mapping, tag_mapping, node_typ
 
         # Create the entry if it doesn't exist already.
         zinnia_entry, created = Entry.objects.get_or_create(content=body, creation_date=created,
+                                                            publication_date=created,
                                                             last_update=modified, title=title,
                                                             status=PUBLISHED, slug=slugify(title))
 
@@ -615,7 +609,7 @@ def import_content(drupal, user_mapping, category_mapping, tag_mapping, node_typ
 ###########
 # Command #
 ###########
-class Command(LabelCommand):
+class Command(BaseCommand):
     """
     Implements a custom Django management command used for importing Drupal blog
     into Zinnia.
@@ -642,29 +636,29 @@ Currently the script has the following limitations:
       comment titles)
 """
 
-    option_list = LabelCommand.option_list + (
-        make_option("-H", "--database-hostname", type="string", default="localhost",
-                    help="Hostname of database server providing the Drupal database. Default is 'localhost'."),
-        make_option("-p", "--database-port", type="int", default=3306,
-                    help="TCP port at which the database server is listening. Default is '3306'."),
-        make_option("-u", "--database-username", type="string", default="root",
-                    help="Username that should be used for connecting to database server. Default is 'root'."),
-        make_option("-P", "--database-password", type="string", default=None,
-                    dest="database_password_file",
-                    help="Path to file containing the password for specified database username. If not set (default), the password will be read interactively."),
-        make_option("-n", "--node-type", type="string", default="blog",
-                    help="Drupal Node type that should be processed. Default is 'blog'."),
-        make_option("-m", "--user-mapping", type="string", action="callback",
-                    callback=create_mappingaction("user_mapping"), default=dict(),
-                    help="Mapping of Drupal usernames to Zinnia usernames. Format is 'duser1=zuser1:duser2=zuser2:...:dusern=zusern'. Default is to use same username as in Drupal."),
-        make_option("-U", "--users", type="string", default=None,
-                    help="Comma-separated list of Drupal users that should be imported, including user-created content. Default is to import content from all users."),
-        make_option("-t", "--threaded-comments", action="store_true",
-                    default=False, dest="threaded_comments",
-                    help="Import comments while preserving threading information. Requires zinnia-threaded-comments application. Default is not to use threaded comments."),
-        )
+    def add_arguments(self, parser):
+        parser.add_argument("-H", "--database-hostname", type=str, default="localhost",
+                            help="Hostname of database server providing the Drupal database. Default is 'localhost'.")
+        parser.add_argument("-p", "--database-port", type=int, default=3306,
+                            help="TCP port at which the database server is listening. Default is '3306'.")
+        parser.add_argument("-u", "--database-username", type=str, default="root",
+                            help="Username that should be used for connecting to database server. Default is 'root'.")
+        parser.add_argument("-P", "--database-password", type=str, default=None,
+                            dest="database_password_file",
+                            help="Path to file containing the password for specified database username. If not set (default), the password will be read interactively.")
+        parser.add_argument("-n", "--node-type", type=str, default="blog",
+                            help="Drupal Node type that should be processed. Default is 'blog'.")
+        parser.add_argument("-m", "--user-mapping", action=MappingAction, default=dict(),
+                            help="Mapping of Drupal usernames to Zinnia usernames. Format is 'duser1=zuser1:duser2=zuser2:...:dusern=zusern'. Default is to use same username as in Drupal.")
+        parser.add_argument("-U", "--users", type=str, default=None,
+                            help="Comma-separated list of Drupal users that should be imported, including user-created content. Default is to import content from all users.")
+        parser.add_argument("-t", "--threaded-comments", action="store_true",
+                            default=False, dest="threaded_comments",
+                            help="Import comments while preserving threading information. Requires zinnia-threaded-comments application. Default is not to use threaded comments.")
+        parser.add_argument("database_name", type=str,
+                            help="Name of the database")
 
-    def handle_label(self, database_name, **options):
+    def handle(self, database_name, **options):
         # Read the password for Drupal database if it wasn't provided within a file.
         if options['database_password_file']:
             options['database_password'] = open(options['database_password_file'], "r").read().rstrip().lstrip()
@@ -689,13 +683,17 @@ Currently the script has the following limitations:
         disconnect_entry_signals()
 
         # Import the users.
-        user_stats, user_mapping = import_users(drupal, users=users, custom_mapping=options["user_mapping"])
+        with transaction.atomic():
+            user_stats, user_mapping = import_users(drupal, users=users, custom_mapping=options["user_mapping"])
         # Import the categories.
-        category_stats, category_mapping = import_categories(drupal)
+        with transaction.atomic():
+            category_stats, category_mapping = import_categories(drupal)
         # Extract the tag mapping.
-        tag_mapping = extract_tags(drupal)
+        with transaction.atomic():
+            tag_mapping = extract_tags(drupal)
         # Finally, import the actual content.
-        content_stats = import_content(drupal, user_mapping, category_mapping, tag_mapping, options['node_type'], options["threaded_comments"])
+        with transaction.atomic():
+            content_stats = import_content(drupal, user_mapping, category_mapping, tag_mapping, options['node_type'], options["threaded_comments"])
 
         # Output a summary.
         print
