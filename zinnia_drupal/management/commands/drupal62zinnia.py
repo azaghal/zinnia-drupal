@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 import urllib
 
 # Django imports.
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.template.defaultfilters import slugify
 from django.db import IntegrityError, transaction
 from django.contrib.contenttypes.models import ContentType
@@ -659,6 +659,11 @@ Currently the script has the following limitations:
                             help="Name of the database")
 
     def handle(self, database_name, **options):
+
+        # Verify that
+        if options['threaded_comments'] and not hasattr(Comment, "parent"):
+            raise CommandError("Currently configured comment model does not have the 'parent' attribute, but threaded comment import has been requested. Check your COMMENTS_APP setting.")
+
         # Read the password for Drupal database if it wasn't provided within a file.
         if options['database_password_file']:
             options['database_password'] = open(options['database_password_file'], "r").read().rstrip().lstrip()

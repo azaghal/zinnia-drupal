@@ -21,3 +21,9 @@ functionality.
 -----
 
 Minor packaging changes in order to allow upload to PyPI.
+
+0.2
+---
+
+Updated application for use with Django 1.10.x and latest pip. Improved
+performance.
