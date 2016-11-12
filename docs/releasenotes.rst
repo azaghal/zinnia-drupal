@@ -27,3 +27,9 @@ Minor packaging changes in order to allow upload to PyPI.
 
 Updated application for use with Django 1.10.x and latest pip. Improved
 performance.
+
+0.2.1
+-----
+
+Small bug-fix that preserves ownership of comments for authenticated users (that
+are at the same time known in Zinnia).
